@@ -19,8 +19,16 @@ services:
         value: llama-3.2-11b-vision-preview
       - key: GROQ_TEXT_MODEL
         value: llama-3.1-8b-instant
-      - key: RESEND_API_KEY
+      - key: MAILTRAP_HOST
         sync: false
+      - key: MAILTRAP_PORT
+        sync: false
+      - key: MAILTRAP_USERNAME
+        sync: false
+      - key: MAILTRAP_PASSWORD
+        sync: false
+      - key: EMAIL_FROM
+        value: "noreply@nexloan.com"
       - key: R2_ACCOUNT_ID
         sync: false
       - key: R2_ACCESS_KEY_ID
