@@ -1,6 +1,6 @@
 """
 NexLoan Email Service — OTP and Transactional Emails
-Uses Mailtrap SMTP to send branded HTML emails.
+Uses generic SMTP to send branded HTML emails.
 """
 
 import logging
@@ -143,7 +143,7 @@ async def send_no_dues_certificate(
 
 async def _send_smtp_email(to_email: str, subject: str, html_content: str) -> bool:
     """
-    Send email via Mailtrap SMTP.
+    Send email via SMTP with enhanced error handling and TLS/SSL auto-detection.
     
     Args:
         to_email: Recipient email address
@@ -154,6 +154,11 @@ async def _send_smtp_email(to_email: str, subject: str, html_content: str) -> bo
         True if sent successfully, False otherwise
     """
     try:
+        # Validate credentials
+        if not settings.SMTP_USERNAME or not settings.SMTP_PASSWORD:
+            logger.error("❌ SMTP credentials missing. Please check SMTP_USERNAME and SMTP_PASSWORD.")
+            return False
+
         # Create message
         msg = MIMEMultipart("alternative")
         msg["Subject"] = subject
@@ -164,22 +169,34 @@ async def _send_smtp_email(to_email: str, subject: str, html_content: str) -> bo
         part = MIMEText(html_content, "html")
         msg.attach(part)
         
+        # Determine TLS vs STARTTLS based on port
+        port = int(settings.SMTP_PORT)
+        use_tls = (port == 465)
+        start_tls = (port == 587 or port == 25)
+
+        logger.info(f"📧 Attempting to send email to {to_email} via {settings.SMTP_HOST}:{port}...")
+
         # Send via aiosmtplib (async)
         await aiosmtplib.send(
             msg,
             hostname=settings.SMTP_HOST,
-            port=settings.SMTP_PORT,
+            port=port,
             username=settings.SMTP_USERNAME,
             password=settings.SMTP_PASSWORD,
-            use_tls=False,  # Usually False when using STARTTLS
-            start_tls=True,
+            use_tls=use_tls,
+            start_tls=start_tls,
         )
         
-        logger.info(f"✅ Async Email sent to {to_email} (Subject: {subject})")
+        logger.info(f"✅ Email sent successfully to {to_email}")
         return True
         
     except Exception as e:
-        logger.error(f"❌ SMTP Error sending to {to_email}: {e}")
+        logger.error(f"❌ SMTP Error sending to {to_email}: {type(e).__name__}: {e}")
+        # Suggest potential fixes based on common errors
+        if "AuthenticationFailed" in str(e):
+            logger.error("💡 Hint: SMTP authentication failed. Check your password or use an App Password if using Gmail.")
+        elif "ConnectionRefusedError" in str(e):
+            logger.error(f"💡 Hint: Connection refused on port {settings.SMTP_PORT}. Check if your SMTP provider allows this port on Render.")
         return False
 
 

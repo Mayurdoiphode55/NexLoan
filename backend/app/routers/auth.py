@@ -118,6 +118,7 @@ async def register(
     print("="*60 + "\n")
 
     # Send OTP via email in background
+    logger.info(f"📨 Dispatching OTP email to {req.email} via background task...")
     background_tasks.add_task(send_otp_email, req.email, otp, req.full_name)
 
     return RegisterResponse(
@@ -165,6 +166,7 @@ async def send_otp_endpoint(
     print("="*60 + "\n")
 
     # Send OTP via email in background
+    logger.info(f"📨 Dispatching OTP email (resend) to {user.email} via background task...")
     background_tasks.add_task(send_otp_email, user.email, otp, user.full_name)
 
     return {
