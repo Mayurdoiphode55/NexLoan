@@ -176,7 +176,8 @@ async def _send_smtp_email(to_email: str, subject: str, html_content: str) -> bo
 
         logger.info(f"📧 Attempting to send email to {to_email} via {settings.SMTP_HOST}:{port}...")
 
-        # Send via aiosmtplib (async)
+        # Send via aiosmtplib (async) with a timeout
+        logger.info(f"⚡ Connecting to {settings.SMTP_HOST}:{port} (use_tls={use_tls}, start_tls={start_tls})...")
         await aiosmtplib.send(
             msg,
             hostname=settings.SMTP_HOST,
@@ -185,6 +186,7 @@ async def _send_smtp_email(to_email: str, subject: str, html_content: str) -> bo
             password=settings.SMTP_PASSWORD,
             use_tls=use_tls,
             start_tls=start_tls,
+            timeout=15,
         )
         
         logger.info(f"✅ Email sent successfully to {to_email}")
