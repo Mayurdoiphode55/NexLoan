@@ -40,8 +40,9 @@ class Settings(BaseSettings):
     SMTP_PASSWORD: str = ""
     EMAIL_FROM: str = "mayurdoiphode55@gmail.com"
     
-    # Resend (email) — Legacy, use Mailtrap instead
-    RESEND_API_KEY: str = ""
+    # Brevo API — For reliable delivery on Render (Port 443)
+    # Reuses SMTP_PASSWORD if BREVO_API_KEY is not set
+    BREVO_API_KEY: str = ""
 
     # Twilio (optional — SMS OTP)
     TWILIO_ACCOUNT_SID: Optional[str] = None

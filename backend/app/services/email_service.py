@@ -1,39 +1,35 @@
-"""
-NexLoan Email Service — OTP and Transactional Emails
-Uses generic SMTP to send branded HTML emails.
-"""
-
 import logging
-import aiosmtplib
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
+import httpx
+from typing import Optional
 
 from app.config import settings
 
 logger = logging.getLogger("nexloan.email")
 
+# Shared HTTP client for efficiency
+_http_client: Optional[httpx.AsyncClient] = None
+
+
+async def _get_client() -> httpx.AsyncClient:
+    """Get or create a shared httpx AsyncClient."""
+    global _http_client
+    if _http_client is None or _http_client.is_closed:
+        _http_client = httpx.AsyncClient(timeout=30.0)
+    return _http_client
+
 
 async def send_otp_email(email: str, otp: str, full_name: str) -> bool:
     """
-    Send an OTP verification email via Mailtrap SMTP.
-
-    Args:
-        email: Recipient email address
-        otp: 6-digit OTP
-        full_name: Recipient's full name for personalization
-
-    Returns:
-        True if email sent successfully, False otherwise
+    Send an OTP verification email via Brevo API.
     """
     try:
         html_content = _otp_email_template(full_name, otp)
-
-        return await _send_smtp_email(
+        return await _send_brevo_api_email(
             to_email=email,
+            to_name=full_name,
             subject="Your NexLoan OTP Verification Code",
             html_content=html_content
         )
-
     except Exception as e:
         logger.error(f"❌ Failed to send OTP email to {email}: {e}")
         return False
@@ -49,31 +45,18 @@ async def send_approval_email(
     tenure_months: int,
 ) -> bool:
     """
-    Send a loan approval email via Mailtrap SMTP.
-
-    Args:
-        email: Recipient email
-        full_name: Borrower name
-        loan_number: Loan ID for reference
-        loan_amount: Approved loan amount
-        interest_rate: Interest rate (p.a.)
-        emi_amount: Monthly EMI
-        tenure_months: Loan tenure in months
-
-    Returns:
-        True if sent successfully
+    Send a loan approval email via Brevo API.
     """
     try:
         html_content = _approval_email_template(
             full_name, loan_number, loan_amount, interest_rate, emi_amount, tenure_months
         )
-
-        return await _send_smtp_email(
+        return await _send_brevo_api_email(
             to_email=email,
+            to_name=full_name,
             subject=f"🎉 Your Loan {loan_number} is Approved!",
             html_content=html_content
         )
-
     except Exception as e:
         logger.error(f"❌ Failed to send approval email to {email}: {e}")
         return False
@@ -83,26 +66,16 @@ async def send_rejection_email(
     email: str, full_name: str, loan_number: str, reason: str
 ) -> bool:
     """
-    Send a loan rejection email via Mailtrap SMTP.
-
-    Args:
-        email: Recipient email
-        full_name: Borrower name
-        loan_number: Loan number for reference
-        reason: Human-readable rejection reason
-
-    Returns:
-        True if sent successfully
+    Send a loan rejection email via Brevo API.
     """
     try:
         html_content = _rejection_email_template(full_name, loan_number, reason)
-
-        return await _send_smtp_email(
+        return await _send_brevo_api_email(
             to_email=email,
+            to_name=full_name,
             subject=f"Update on Your Loan Application {loan_number}",
             html_content=html_content
         )
-
     except Exception as e:
         logger.error(f"❌ Failed to send rejection email to {email}: {e}")
         return False
@@ -112,93 +85,77 @@ async def send_no_dues_certificate(
     email: str, full_name: str, loan_number: str, loan_amount: float, total_paid: float
 ) -> bool:
     """
-    Send a no-dues certificate email via Mailtrap SMTP.
-
-    Args:
-        email: Recipient email
-        full_name: Borrower name
-        loan_number: Loan number
-        loan_amount: Original loan amount
-        total_paid: Total amount paid
-
-    Returns:
-        True if sent successfully
+    Send a no-dues certificate email via Brevo API.
     """
     try:
         html_content = _no_dues_certificate_template(full_name, loan_number, loan_amount, total_paid)
-
-        return await _send_smtp_email(
+        return await _send_brevo_api_email(
             to_email=email,
+            to_name=full_name,
             subject=f"Your NexLoan No-Dues Certificate - {loan_number}",
             html_content=html_content
         )
-
     except Exception as e:
         logger.error(f"❌ Failed to send no-dues certificate to {email}: {e}")
         return False
 
 
-# ─── SMTP Helper ────────────────────────────────────────────────────────────────
+# ─── Brevo API Helper ─────────────────────────────────────────────────────────
 
 
-async def _send_smtp_email(to_email: str, subject: str, html_content: str) -> bool:
+async def _send_brevo_api_email(to_email: str, to_name: str, subject: str, html_content: str) -> bool:
     """
-    Send email via SMTP with enhanced error handling and TLS/SSL auto-detection.
-    
-    Args:
-        to_email: Recipient email address
-        subject: Email subject
-        html_content: HTML email body
-        
-    Returns:
-        True if sent successfully, False otherwise
+    Send email via Brevo REST API (HTTPS Port 443).
+    This is much more reliable than SMTP on cloud platforms like Render.
     """
     try:
-        # Validate credentials
-        if not settings.SMTP_USERNAME or not settings.SMTP_PASSWORD:
-            logger.error("❌ SMTP credentials missing. Please check SMTP_USERNAME and SMTP_PASSWORD.")
+        # Resolve API Key (fallback to SMTP_PASSWORD if BREVO_API_KEY is not set)
+        api_key = settings.BREVO_API_KEY or settings.SMTP_PASSWORD
+        
+        if not api_key:
+            logger.error("❌ Brevo API Key is missing. Please set BREVO_API_KEY or SMTP_PASSWORD.")
             return False
 
-        # Create message
-        msg = MIMEMultipart("alternative")
-        msg["Subject"] = subject
-        msg["From"] = settings.EMAIL_FROM
-        msg["To"] = to_email
+        url = "https://api.brevo.com/v3/smtp/email"
+        headers = {
+            "api-key": api_key,
+            "Content-Type": "application/json",
+            "Accept": "application/json"
+        }
         
-        # Attach HTML content
-        part = MIMEText(html_content, "html")
-        msg.attach(part)
-        
-        # Determine TLS vs STARTTLS based on port
-        port = int(settings.SMTP_PORT)
-        use_tls = (port == 465)
-        start_tls = (port == 587 or port == 25)
+        payload = {
+            "sender": {
+                "name": settings.APP_NAME,
+                "email": settings.EMAIL_FROM
+            },
+            "to": [
+                {
+                    "email": to_email,
+                    "name": to_name
+                }
+            ],
+            "subject": subject,
+            "htmlContent": html_content
+        }
 
-        logger.info(f"📧 Attempting to send email to {to_email} via {settings.SMTP_HOST}:{port}...")
-
-        # Send via aiosmtplib (async) with a timeout
-        logger.info(f"⚡ Connecting to {settings.SMTP_HOST}:{port} (use_tls={use_tls}, start_tls={start_tls})...")
-        await aiosmtplib.send(
-            msg,
-            hostname=settings.SMTP_HOST,
-            port=port,
-            username=settings.SMTP_USERNAME,
-            password=settings.SMTP_PASSWORD,
-            use_tls=use_tls,
-            start_tls=start_tls,
-            timeout=15,
-        )
+        client = await _get_client()
+        logger.info(f"📧 Sending Brevo API email to {to_email}...")
         
-        logger.info(f"✅ Email sent successfully to {to_email}")
-        return True
+        response = await client.post(url, json=payload, headers=headers)
         
+        if response.status_code in [201, 200, 202]:
+            logger.info(f"✅ API Email sent successfully to {to_email}")
+            return True
+        else:
+            logger.error(f"❌ Brevo API Error ({response.status_code}): {response.text}")
+            if response.status_code == 401:
+                logger.error("💡 Hint: Your Brevo API Key is invalid or expired.")
+            elif response.status_code == 400:
+                logger.error("💡 Hint: Malformed request or unverified sender email.")
+            return False
+            
     except Exception as e:
-        logger.error(f"❌ SMTP Error sending to {to_email}: {type(e).__name__}: {e}")
-        # Suggest potential fixes based on common errors
-        if "AuthenticationFailed" in str(e):
-            logger.error("💡 Hint: SMTP authentication failed. Check your password or use an App Password if using Gmail.")
-        elif "ConnectionRefusedError" in str(e):
-            logger.error(f"💡 Hint: Connection refused on port {settings.SMTP_PORT}. Check if your SMTP provider allows this port on Render.")
+        logger.error(f"❌ Exception sending Brevo API email: {e}")
         return False
 
 

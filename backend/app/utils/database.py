@@ -11,6 +11,7 @@ except ImportError:
     # Fallback for SQLAlchemy 1.4
     async_sessionmaker = sessionmaker
 
+from sqlalchemy.pool import NullPool
 from app.config import settings
 from app.models.loan import Base
 
@@ -18,9 +19,7 @@ from app.models.loan import Base
 engine = create_async_engine(
     settings.DATABASE_URL,
     echo=settings.DEBUG,
-    pool_size=5,
-    max_overflow=10,
-    pool_pre_ping=True,
+    poolclass=NullPool,
     connect_args={
         "statement_cache_size": 0,
         "prepared_statement_cache_size": 0,
